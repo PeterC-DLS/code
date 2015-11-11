@@ -26,6 +26,7 @@ typedef struct __NXVContext {
 		unsigned int errCount;
 		unsigned int warnCount;
 		xmlDocPtr nxdlDoc;
+		hash_table dimSymbols;
 }NXVcontext;
 
 /*

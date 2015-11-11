@@ -119,6 +119,7 @@ pNXVcontext NXVinit(char *nxdlDir)
 	self->nxdlRetriever = NXVdefaultRetriever;
 	self->retrieverUserData = nxdlDir;
 	hash_construct_table(&self->logData,50);
+	hash_construct_table(&self->dimSymbols,20);
 	return self;
 }
 /*----------------------------------------------------------------*/
@@ -134,6 +135,7 @@ void NXVkill(pNXVcontext self)
 			free(self->nxdlFile);
 		}
 		hash_free_table(&self->logData,free);
+		hash_free_table(&self->dimSymbols,free);
 		free(self);
 }
 /*----------------------------------------------------------------*/
@@ -173,6 +175,8 @@ void NXVprepareContext(pNXVcontext self, char *dataFile,
 	hash_free_table(&self->logData,free);
 	hash_construct_table(&self->logData,50);
 	hash_insert("dataFile",strdup(dataFile),&self->logData);
+	hash_free_table(&self->dimSymbols,free);
+	hash_construct_table(&self->dimSymbols,20);
 	self->errCount = 0;
 	self->warnCount = 0;
 }

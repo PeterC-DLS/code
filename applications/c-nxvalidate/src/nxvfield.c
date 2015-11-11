@@ -9,6 +9,7 @@
 #include <hdf5.h>
 #include <hdf5_hl.h>
 #include <string.h>
+#include <assert.h>
 #include <libxml/tree.h>
 
 static void validateData(pNXVcontext self, hid_t fieldID,
@@ -17,10 +18,104 @@ static void validateData(pNXVcontext self, hid_t fieldID,
 	/* TODO */
 }
 /*-------------------------------------------------------------*/
+static int isInteger(char *txt)
+{
+	int i;
+
+	for(i = 0; i < strlen(txt); i++){
+		if(txt[i] != '-' && txt[i] != '+' && !isdigit(txt[i])){
+			return 0;
+		}
+	}
+	return 1;
+}
+/*-------------------------------------------------------------*/
 static void validateDimensions(pNXVcontext self, hid_t fieldID,
 	xmlNodePtr dimNode)
 {
-	/* TODO */
+	hid_t dSpace;
+	int h5rank, nxdlRank, idx, dimVal, *dimInt;
+	hsize_t h5dim[H5S_MAX_RANK];
+	xmlChar *data, *val, *index;
+	xmlNodePtr dim;
+	/*
+		get info from HDF5 file
+	*/
+	dSpace = H5Dget_space(fieldID);
+	assert(dSpace >= 0);
+	h5rank = H5Sget_simple_extent_ndims(dSpace);
+	H5Sget_simple_extent_dims(dSpace,h5dim,NULL);
+	H5Sclose(dSpace);
+
+	/*
+		now compare with NXDL
+	*/
+	data = xmlGetProp(dimNode,(xmlChar *)"rank");
+	if(data != NULL){
+		nxdlRank = atoi((char *)data);
+		if(nxdlRank != h5rank){
+			NXVsetLog(self,"sev","error");
+			NXVprintLog(self,"message","Rank mismatch expected %d, found %d",
+				nxdlRank, h5rank);
+			NXVlog(self);
+			self->errCount++;
+			return; /* further dimension checking makes no sense here */
+		}
+	} else {
+		NXVsetLog(self,"sev","error");
+		NXVsetLog(self,"message","Invalid NXDL entry, missing rank on dimensions field");
+		NXVlog(self);
+		self->errCount++;
+		return;
+	}
+
+	/*
+		check the individual dimensions
+	*/
+	dim = dimNode->xmlChildrenNode;
+	while(dim != NULL){
+		if(xmlStrcmp(dim->name,(xmlChar *)"dim") == 0){
+			index = xmlGetProp(dim,(xmlChar *)"index");
+			val = xmlGetProp(dim,(xmlChar *)"value");
+			if(index == NULL || val == NULL){
+				NXVsetLog(self,"sev","error");
+				NXVsetLog(self,"message",
+				"Invalid NXDL: dim entry is missing index or value attribute");
+				NXVlog(self);
+				self->errCount++;
+				continue;
+			}
+			idx = atoi((char *)index);
+			idx--; /* start counting at 1, bizarre.... */
+			if(isInteger((char *)val)){
+				dimVal = atoi((char *)val);
+				if(dimVal != h5dim[idx]){
+					NXVsetLog(self,"sev","error");
+					NXVprintLog(self,"message",
+						"Dimension mismatch on %d, should %d, is %d",
+						idx+1, dimVal, h5dim[idx]);
+					NXVlog(self);
+					self->errCount++;
+				}
+			} else {
+				if((dimInt = (int *)hash_lookup((char *)val,&self->dimSymbols)) == NULL){
+					dimInt = malloc(sizeof(int));
+					*dimInt = h5dim[idx];
+					hash_insert((char *)val,dimInt,&self->dimSymbols);
+				} else {
+					if(*dimInt != h5dim[idx]){
+						NXVsetLog(self,"sev","error");
+						NXVprintLog(self,"message",
+							"Dimension mismatch on %d, should %d, is %d",
+							idx+1, *dimInt, h5dim[idx]);
+						NXVlog(self);
+						self->errCount++;
+					}
+				}
+			}
+		}
+		dim = dim->next;
+	}
 }
 /*--------------------------------------------------------------*/
 static void validateUnits(pNXVcontext self, hid_t fieldID,

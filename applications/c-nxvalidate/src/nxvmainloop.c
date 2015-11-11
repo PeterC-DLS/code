@@ -208,7 +208,7 @@ static herr_t NXVrootIterator(hid_t g_id,
 			}
 			defID = H5LTread_dataset_string (entryID,
 				 "definition", definition );
-			if(defID > 0){
+			if(defID >= 0){
 				validatePath(self,nxPath,definition);
 			} else {
 				/*

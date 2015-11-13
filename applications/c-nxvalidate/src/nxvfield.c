@@ -17,6 +17,109 @@ static void validateData(pNXVcontext self, hid_t fieldID,
 {
 	/* TODO */
 }
+/*--------------------------------------------------------------*/
+static void validateDataOffsetStride(pNXVcontext self, hid_t fieldID)
+{
+	/*
+		TODO
+
+		Here we can validate that there is an stride attribute if there
+		is a data_offset, that both are of the right type and have the
+		same rank as the dataset.
+	*/
+}
+/*--------------------------------------------------------------*/
+static void validateAxes(pNXVcontext self, hid_t fieldID)
+{
+	/*
+	TODO
+
+	Here we can dissamble the axes attribute and check that all
+	datasets mentioned as axes are present in the enclosing group
+	*/
+}
+/*--------------------------------------------------------------*/
+static void validateInterpretation(pNXVcontext self, hid_t fieldID)
+{
+	char h5name[512], attData[512];
+	char *allowedValues[] = {
+		"scaler",
+		"spectrum",
+		"image",
+		"rgba-image",
+		"hsla-image",
+		"cmyk_image",
+		"vertex",
+		NULL
+	};
+	int i;
+	/*
+
+	Here we can check if the interpretation attribute has one of
+	the allowed values
+	*/
+
+
+	if(!H5LTfind_attribute(fieldID,"interpretation")){
+		return;
+	}
+	memset(h5name,0,sizeof(h5name));
+	memset(attData,0,sizeof(attData));
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+	H5LTget_attribute_string(self->fileID,h5name,"interpretation",attData);
+	i = 0;
+	while(allowedValues[i] != NULL){
+		if(strcmp(allowedValues,attData) == 0){
+			return;
+		}
+		i++;
+	}
+
+	NXVsetLog(self,"sev","error");
+	NXVprintLog(self,"message","Invalid value %s for interpretation attribute",
+		attData);
+	NXVlog(self);
+	self->errCount++;
+
+}
+/*--------------------------------------------------------------*/
+static void validateCalibration(pNXVcontext self, hid_t fieldID)
+{
+	char h5name[512], attData[512];
+	char *allowedValues[] = {
+		"Nominal",
+		"Measured",
+		NULL
+	};
+	int i;
+
+	/*
+
+	Here we can check if the calibration attribute has one of
+	the allowed values
+	*/
+	if(!H5LTfind_attribute(fieldID,"calibration_status")){
+		return;
+	}
+	memset(h5name,0,sizeof(h5name));
+	memset(attData,0,sizeof(attData));
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+	H5LTget_attribute_string(self->fileID,h5name,"calibration_status",attData);
+	i = 0;
+	while(allowedValues[i] != NULL){
+		if(strcmp(allowedValues,attData) == 0){
+			return;
+		}
+		i++;
+	}
+
+	NXVsetLog(self,"sev","error");
+	NXVprintLog(self,"message","Invalid value %s for calibration_status attribute",
+		attData);
+	NXVlog(self);
+	self->errCount++;
+
+}
 /*-------------------------------------------------------------*/
 static int isInteger(char *txt)
 {
@@ -63,7 +166,8 @@ static void validateDimensions(pNXVcontext self, hid_t fieldID,
 		}
 	} else {
 		NXVsetLog(self,"sev","error");
-		NXVsetLog(self,"message","Invalid NXDL entry, missing rank on dimensions field");
+		NXVsetLog(self,"message",
+			"Invalid NXDL entry, missing rank on dimensions field");
 		NXVlog(self);
 		self->errCount++;
 		return;
@@ -280,22 +384,161 @@ static void validateType(pNXVcontext self, hid_t fieldID,
  --------------------------------------------------------------*/
 typedef int (*AttributeDataValidator)(pNXVcontext self,
 	hid_t fieldID, char *testValue);
-
+/*-------------------------------------------------------------*/
 typedef struct {
 	char *name;
 	AttributeDataValidator dataValidator;
 }AttributeValidationData;
-
 /*--------------------------------------------------------------*/
 static int SignalValidator(pNXVcontext self, hid_t fieldID,
 	char *testValue)
 {
-	return 1;
+	char h5value[132];
+	char h5name[512];
+	int ih5value, status;
+
+	memset(h5value,0,sizeof(h5value));
+	memset(h5name,0,sizeof(h5name));
+
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+
+	/*
+		we accept integers
+	*/
+	status = H5LTget_attribute_int(self->fileID,h5name,"signal",&ih5value);
+	if(status >= 0){
+		if(atoi(testValue) == ih5value){
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+	/*
+		or  strings
+	*/
+	status = H5LTget_attribute_string(self->fileID,h5name,"signal",h5value);
+	if(status >= 0){
+				if(strcmp(h5value,testValue) == 0){
+					return 1;
+				} else {
+					return 0;
+				}
+	}
+
+
+	return 0;
+}
+/*--------------------------------------------------------------*/
+static int AxisValidator(pNXVcontext self, hid_t fieldID,
+	char *testValue)
+{
+	char h5value[132];
+	char h5name[512];
+	int ih5value, status;
+
+	memset(h5value,0,sizeof(h5value));
+	memset(h5name,0,sizeof(h5name));
+
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+
+	/*
+		we accept integers
+	*/
+	status = H5LTget_attribute_int(self->fileID,h5name,"axis",&ih5value);
+	if(status >= 0){
+		if(atoi(testValue) == ih5value){
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+
+	/*
+		or strings
+	*/
+	status = H5LTget_attribute_string(self->fileID,h5name,"axis",h5value);
+	if(status >= 0){
+				if(strcmp(h5value,testValue) == 0){
+					return 1;
+				} else {
+					return 0;
+				}
+	}
+
+	return 0;
+}
+/*--------------------------------------------------------------*/
+static int PrimaryValidator(pNXVcontext self, hid_t fieldID,
+	char *testValue)
+{
+	char h5value[132];
+	char h5name[512];
+	int ih5value, status;
+
+	memset(h5value,0,sizeof(h5value));
+	memset(h5name,0,sizeof(h5name));
+
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+
+	/*
+		we accept integers
+	*/
+	status = H5LTget_attribute_int(self->fileID,h5name,"primary",&ih5value);
+	if(status >= 0){
+		if(atoi(testValue) == ih5value){
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+	/*
+		or strings
+	*/
+	status = H5LTget_attribute_string(self->fileID,h5name,"primary",h5value);
+	if(status >= 0){
+				if(strcmp(h5value,testValue) == 0){
+					return 1;
+				} else {
+					return 0;
+				}
+	}
+
+
+	return 0;
+}
+/*--------------------------------------------------------------*/
+static int TransformationValidator(pNXVcontext self, hid_t fieldID,
+	char *testValue)
+{
+	char h5value[132];
+	char h5name[512];
+	int ih5value, status;
+
+	memset(h5value,0,sizeof(h5value));
+	memset(h5name,0,sizeof(h5name));
+
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+
+	status = H5LTget_attribute_string(self->fileID,h5name,
+			"transformation_type",h5value);
+	if(status >= 0){
+				if(strcmp(h5value,testValue) == 0){
+					return 1;
+				} else {
+					return 0;
+				}
+	}
+	return 0;
 }
 /*----------------------------------------------------------------*/
 static AttributeValidationData attValData[] = {
 	{"signal",SignalValidator},
-	{"axis",SignalValidator},
+	{"axis",AxisValidator},
+	{"primary",PrimaryValidator},
+	{"transformation_type", TransformationValidator},
 	NULL};
 /*--------------------------------------------------------------*/
 static int findAttValidator(char *name){
@@ -381,12 +624,14 @@ static void validateAttributes(pNXVcontext self, hid_t fieldID,
 							item = attData->xmlChildrenNode;
 							i = findAttValidator((char *)name);
 							while(item != NULL){
-								data = xmlGetProp(item,(xmlChar *)"value");
-									if(data != NULL && i >= 0){
-										status = attValData[i].dataValidator(self,fieldID,data);
-										if(status == 1){
-											attOK = 1;
-											break;
+								if(xmlStrcmp(item->name,(xmlChar *)"item") == 0){
+									data = xmlGetProp(item,(xmlChar *)"value");
+										if(data != NULL && i >= 0){
+											status = attValData[i].dataValidator(self,fieldID,data);
+											if(status == 1){
+												attOK = 1;
+												break;
+											}
 										}
 									}
 									item = item->next;
@@ -406,6 +651,20 @@ static void validateAttributes(pNXVcontext self, hid_t fieldID,
 		}
 		cur = cur->next;
 	}
+
+	/*
+	Here we do some validation on attributes which can be in
+	the HDF5 file but are rarely specified in an application
+	definition. Nevertheless we can make a consistency check
+	on them.
+
+	Please note that the whole CIF array of attributes should be
+	checked from the validateDependsOn function in nxvgroup.c
+	*/
+	validateDataOffsetStride(self, fieldID);
+	validateAxes(self, fieldID);
+	validateInterpretation(self,fieldID);
+	validateCalibration(self,fieldID);
 }
 /*--------------------------------------------------------------*/
 int NXVvalidateField(pNXVcontext self, hid_t fieldID,

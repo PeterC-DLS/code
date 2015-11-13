@@ -12,7 +12,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <nxvalidate.h>
+/*
+	TODO
 
+	write a filtering log emitter and use it
+*/
 int main(int argc, char *argv[])
 {
 	pNXVcontext nxvContext = NULL;

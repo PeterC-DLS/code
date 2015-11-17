@@ -15,28 +15,210 @@
 static void validateData(pNXVcontext self, hid_t fieldID,
 	xmlNodePtr enumNode)
 {
-	/* TODO */
+	hid_t h5type, h5class;
+	char fname[512], textData[1024];
+	xmlNodePtr cur;
+	xmlChar *value;
+
+	h5type = H5Dget_type(fieldID);
+	h5class = H5Tget_class(h5type);
+	H5Tclose(h5type);
+
+	if(h5class != H5T_STRING) {
+		NXVsetLog(self,"sev","error");
+		NXVsetLog(self,"message","Cannot not validate non text data");
+		NXVlog(self);
+		return;
+	}
+
+	memset(fname,0,sizeof(fname));
+	memset(textData,0,sizeof(textData));
+	H5Iget_name(fieldID, fname, sizeof(fname));
+	H5LTread_dataset_string(self->fileID,fname,textData);
+
+	cur = enumNode->xmlChildrenNode;
+	while(cur != 0){
+		if(xmlStrcmp(cur->name,(xmlChar *)"item") == 0){
+			value = xmlGetProp(cur,(xmlChar *)"value");
+			if(value != NULL){
+				if(xmlStrcmp(value,(xmlChar *)textData) == 0){
+					return;
+				}
+			}
+		}
+		cur = cur->next;
+	}
+
+	/*
+		If are here we have not found a valid data entry
+	*/
+	NXVsetLog(self,"sev","error");
+	NXVprintLog(self,"message","Dataset has disallowed value, read %s",
+		textData);
+	NXVlog(self);
+	self->errCount++;
 }
 /*--------------------------------------------------------------*/
 static void validateDataOffsetStride(pNXVcontext self, hid_t fieldID)
 {
 	/*
-		TODO
-
 		Here we can validate that there is an stride attribute if there
-		is a data_offset, that both are of the right type and have the
-		same rank as the dataset.
+		is a data_offset, that both are of the right type and they match
+		the rank of the dataset.
 	*/
+	int count, h5rank, attRank;
+	hid_t dSpace, attID, attSpace, attType;
+	hsize_t dims[1], maxDims[1];
+	H5T_class_t h5class;
+
+	count = H5LTfind_attribute(fieldID,"data_offset");
+	count += H5LTfind_attribute(fieldID,"stride");
+	if(count == 1){
+		NXVsetLog(self,"sev","error");
+		NXVsetLog(self,"message",
+		"one of data_offset or stride missing, must come together when specified");
+		NXVlog(self);
+		self->errCount++;
+	} else if(count == 0){
+		/* do nothing */
+	} else if(count == 2){
+		dSpace = H5Dget_space(fieldID);
+		assert(dSpace >= 0);
+		h5rank = H5Sget_simple_extent_ndims(dSpace);
+		H5Sclose(dSpace);
+
+		attID = H5Aopen(fieldID,"data_offset",H5P_DEFAULT);
+		assert(attID >= 0);
+		attSpace = H5Aget_space(attID);
+		assert(attSpace >= 0);
+		attRank = H5Sget_simple_extent_ndims(attSpace);
+		if(attRank != 1){
+			NXVsetLog(self,"sev","error");
+			NXVprintLog(self,"message",
+				"data_offset attribute has wrong rank, should 1, is %d", attRank);
+			NXVlog(self);
+			self->errCount++;
+		} else {
+			H5Sget_simple_extent_dims(attSpace,dims,maxDims);
+			if(dims[0] != h5rank){
+				NXVsetLog(self,"sev","error");
+				NXVprintLog(self,"message",
+					"data_offset attribute has wrong dimensions should be %d, is %d",
+					h5rank, dims[0]);
+				NXVlog(self);
+				self->errCount++;
+			}
+		}
+		attType = H5Aget_type(attID);
+		h5class = H5Tget_class(attType);
+		if(h5class != H5T_INTEGER){
+			NXVsetLog(self,"sev","error");
+			NXVsetLog(self,"message",
+				"attribute data_offset is of wrong type, must be integer");
+			NXVlog(self);
+			self->errCount++;
+		}
+		H5Tclose(attType);
+		H5Sclose(attSpace);
+		H5Aclose(attID);
+
+		attID = H5Aopen(fieldID,"stride",H5P_DEFAULT);
+		assert(attID >= 0);
+		attSpace = H5Aget_space(attID);
+		assert(attSpace >= 0);
+		attRank = H5Sget_simple_extent_ndims(attSpace);
+		if(attRank != 1){
+			NXVsetLog(self,"sev","error");
+			NXVprintLog(self,"message",
+				"stride attribute has wrong rank, should 1, is %d", attRank);
+			NXVlog(self);
+			self->errCount++;
+		} else {
+			H5Sget_simple_extent_dims(attSpace,dims,maxDims);
+			if(dims[0] != h5rank){
+				NXVsetLog(self,"sev","error");
+				NXVprintLog(self,"message",
+					"stride attribute has wrong dimensions should be %d, is %d",
+					h5rank, dims[0]);
+				NXVlog(self);
+				self->errCount++;
+			}
+		}
+		attType = H5Aget_type(attID);
+		h5class = H5Tget_class(attType);
+		if(h5class != H5T_INTEGER){
+			NXVsetLog(self,"sev","error");
+			NXVsetLog(self,"message",
+				"attribute stride is of wrong type, must be integer");
+			NXVlog(self);
+			self->errCount++;
+		}
+		H5Tclose(attType);
+		H5Sclose(attSpace);
+		H5Aclose(attID);
+
+	} else {
+		assert(0); /* something is seriously broken here */
+	}
 }
 /*--------------------------------------------------------------*/
 static void validateAxes(pNXVcontext self, hid_t fieldID)
 {
 	/*
-	TODO
-
 	Here we can dissamble the axes attribute and check that all
 	datasets mentioned as axes are present in the enclosing group
 	*/
+	char fname[512], axesData[1024], sep[2], *pPtr;
+	hid_t gID;
+
+	if(H5LTfind_attribute(fieldID,"axes") == 0){
+		return;
+	}
+
+	/*
+		TODO
+
+		The code below works with old style axes attributes which are komma or
+		colon separated lists. Now we can also have axes attributes as string
+		arrays. This is not yet supported.
+	*/
+
+	memset(fname,0,sizeof(fname));
+	memset(axesData,0,sizeof(axesData));
+	H5Iget_name(fieldID,fname,sizeof(fname));
+	H5LTget_attribute_string(self->fileID,fname,"axes",axesData);
+
+	/*
+		we allow colon or komma as separators on axes
+	*/
+	if(strchr(axesData,':') != NULL){
+		strcpy(sep,":");
+	} else {
+		strcpy(sep,",");
+	}
+
+	/*
+		get at the enclosing group
+	*/
+	pPtr = strrchr(fname,'/');
+	*pPtr = '\0'; /* cut off the last bit to get at the group */
+	gID = H5Gopen(self->fileID,fname,H5P_DEFAULT);
+	assert(gID >= 0);
+
+	/*
+		loop all the axes entries and check if the datasets exist
+	*/
+	while((pPtr = strsep(&axesData,sep)) != NULL){
+		if(!H5LTfind_dataset(gID,pPtr)){
+			NXVsetLog(self,"sev","error");
+			NXVprintLog(self,"message",
+				"Dataset %s required by axes attribute not found", pPtr);
+			NXVlog(self);
+			self->errCount++;
+		}
+	}
+
+	H5Gclose(gID);
 }
 /*--------------------------------------------------------------*/
 static void validateInterpretation(pNXVcontext self, hid_t fieldID)
@@ -234,6 +416,9 @@ static void validateUnits(pNXVcontext self, hid_t fieldID,
 	/*
 	  more cannot be done: the NXDL units are symbols and as NeXus allows
 		all UDunits unit strings, it is an impossible task to verify this.
+
+		Look at we can do something here usig the UDUNITS library.
+		Find that under software at http://unidata.ucar.edu
 	*/
 }
 /*--------------------------------------------------------------*/
@@ -390,63 +575,33 @@ typedef struct {
 	AttributeDataValidator dataValidator;
 }AttributeValidationData;
 /*--------------------------------------------------------------*/
-static int SignalValidator(pNXVcontext self, hid_t fieldID,
-	char *testValue)
-{
-	char h5value[132];
-	char h5name[512];
-	int ih5value, status;
-
-	memset(h5value,0,sizeof(h5value));
-	memset(h5name,0,sizeof(h5name));
-
-	H5Iget_name(fieldID,h5name,sizeof(h5name));
-
-	/*
-		we accept integers
-	*/
-	status = H5LTget_attribute_int(self->fileID,h5name,"signal",&ih5value);
-	if(status >= 0){
-		if(atoi(testValue) == ih5value){
-			return 1;
-		} else {
-			return 0;
-		}
-	}
-
-	/*
-		or  strings
-	*/
-	status = H5LTget_attribute_string(self->fileID,h5name,"signal",h5value);
-	if(status >= 0){
-				if(strcmp(h5value,testValue) == 0){
-					return 1;
-				} else {
-					return 0;
-				}
-	}
-
-
-	return 0;
-}
-/*--------------------------------------------------------------*/
 static int AxisValidator(pNXVcontext self, hid_t fieldID,
 	char *testValue)
 {
 	char h5value[132];
 	char h5name[512];
-	int ih5value, status;
+	int ih5value;
+	hid_t attID, attType;
+	H5T_class_t h5class;
 
 	memset(h5value,0,sizeof(h5value));
 	memset(h5name,0,sizeof(h5name));
 
 	H5Iget_name(fieldID,h5name,sizeof(h5name));
 
+	attID = H5Aopen(fieldID,"axis",H5P_DEFAULT);
+	assert(attID >= 0);
+	attType = H5Aget_type(attID);
+	assert(attType >= 0);
+	h5class = H5Tget_class(attType);
+	H5Tclose(attType);
+	H5Aclose(attID);
+
 	/*
 		we accept integers
 	*/
-	status = H5LTget_attribute_int(self->fileID,h5name,"axis",&ih5value);
-	if(status >= 0){
+	if(h5class == H5T_INTEGER){
+		H5LTget_attribute_int(self->fileID,h5name,"axis",&ih5value);
 		if(atoi(testValue) == ih5value){
 			return 1;
 		} else {
@@ -454,18 +609,76 @@ static int AxisValidator(pNXVcontext self, hid_t fieldID,
 		}
 	}
 
+	/*
+		or strings
+	*/
+	if(h5class == H5T_STRING){
+		H5LTget_attribute_string(self->fileID,h5name,"axis",h5value);
+		if(strcmp(h5value,testValue) == 0){
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+	NXVsetLog(self,"sev","error");
+	NXVsetLog(self,"message","Axis attribute has wrong data type");
+	NXVlog(self);
+	self->errCount++;
+
+	return 0;
+}
+/*--------------------------------------------------------------*/
+static int SignalValidator(pNXVcontext self, hid_t fieldID,
+	char *testValue)
+{
+	char h5value[132];
+	char h5name[512];
+	int ih5value;
+	hid_t attID, attType;
+	H5T_class_t h5class;
+
+	memset(h5value,0,sizeof(h5value));
+	memset(h5name,0,sizeof(h5name));
+
+	H5Iget_name(fieldID,h5name,sizeof(h5name));
+
+	attID = H5Aopen(fieldID,"signal",H5P_DEFAULT);
+	assert(attID >= 0);
+	attType = H5Aget_type(attID);
+	assert(attType >= 0);
+	h5class = H5Tget_class(attType);
+	H5Tclose(attType);
+	H5Aclose(attID);
+
+	/*
+		we accept integers
+	*/
+	if(h5class == H5T_INTEGER){
+		H5LTget_attribute_int(self->fileID,h5name,"signal",&ih5value);
+		if(atoi(testValue) == ih5value){
+			return 1;
+		} else {
+			return 0;
+		}
+	}
 
 	/*
 		or strings
 	*/
-	status = H5LTget_attribute_string(self->fileID,h5name,"axis",h5value);
-	if(status >= 0){
-				if(strcmp(h5value,testValue) == 0){
-					return 1;
-				} else {
-					return 0;
-				}
+	if(h5class == H5T_STRING){
+		H5LTget_attribute_string(self->fileID,h5name,"signal",h5value);
+		if(strcmp(h5value,testValue) == 0){
+			return 1;
+		} else {
+			return 0;
+		}
 	}
+
+	NXVsetLog(self,"sev","error");
+	NXVsetLog(self,"message","Signal attribute has wrong data type");
+	NXVlog(self);
+	self->errCount++;
 
 	return 0;
 }
@@ -475,18 +688,29 @@ static int PrimaryValidator(pNXVcontext self, hid_t fieldID,
 {
 	char h5value[132];
 	char h5name[512];
-	int ih5value, status;
+	int ih5value;
+	hid_t attID, attType;
+	H5T_class_t h5class;
 
 	memset(h5value,0,sizeof(h5value));
 	memset(h5name,0,sizeof(h5name));
 
 	H5Iget_name(fieldID,h5name,sizeof(h5name));
 
+	attID = H5Aopen(fieldID,"primary",H5P_DEFAULT);
+	assert(attID >= 0);
+	attType = H5Aget_type(attID);
+	assert(attType >= 0);
+	h5class = H5Tget_class(attType);
+	H5Tclose(attType);
+	H5Aclose(attID);
+
+
 	/*
 		we accept integers
 	*/
-	status = H5LTget_attribute_int(self->fileID,h5name,"primary",&ih5value);
-	if(status >= 0){
+	if(h5class == H5T_INTEGER){
+		H5LTget_attribute_int(self->fileID,h5name,"primary",&ih5value);
 		if(atoi(testValue) == ih5value){
 			return 1;
 		} else {
@@ -494,18 +718,23 @@ static int PrimaryValidator(pNXVcontext self, hid_t fieldID,
 		}
 	}
 
+
 	/*
 		or strings
 	*/
-	status = H5LTget_attribute_string(self->fileID,h5name,"primary",h5value);
-	if(status >= 0){
-				if(strcmp(h5value,testValue) == 0){
-					return 1;
-				} else {
-					return 0;
-				}
+	if(h5class == H5T_STRING){
+		H5LTget_attribute_string(self->fileID,h5name,"primary",h5value);
+		if(strcmp(h5value,testValue) == 0){
+			return 1;
+		} else {
+			return 0;
+		}
 	}
 
+	NXVsetLog(self,"sev","error");
+	NXVsetLog(self,"message","Primary attribute has wrong data type");
+	NXVlog(self);
+	self->errCount++;
 
 	return 0;
 }

@@ -17,7 +17,11 @@
 /*------------------------------------------------------------------*/
 static void defaultLogPrint(char *key, void *data)
 {
-	fprintf(stdout,"%s=%s ", key, (char *)data);
+	if(strchr((char *)data, ' ') != NULL){
+		fprintf(stdout,"%s=\“%s\" ", key, (char *)data);
+	} else {
+		fprintf(stdout,"%s=%s ", key, (char *)data);
+	}
 }
 /*-----------------------------------------------------------------*/
 static void NXVdefaultLogger(hash_table *logData, void *userData)

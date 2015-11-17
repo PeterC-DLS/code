@@ -12,11 +12,49 @@
 #include <string.h>
 #include <ctype.h>
 #include <nxvalidate.h>
-/*
-	TODO
 
-	write a filtering log emitter and use it
-*/
+/*------------------------------------------------------------------*/
+typedef struct {
+	int warnOpt;
+	int debug;
+	int warnUndefined;
+	int warnBase;
+}PrintFilter;
+/*------------------------------------------------------------------*/
+static void defaultLogPrint(char *key, void *data)
+{
+	if(strchr((char *)data, ' ') != NULL){
+		fprintf(stdout,"%s=\"%s\" ", key, (char *)data);
+	} else {
+		fprintf(stdout,"%s=%s ", key, (char *)data);
+	}
+}
+/*-----------------------------------------------------------------*/
+static void FilteringLogger(hash_table *logData, void *userData)
+{
+	PrintFilter *filt = (PrintFilter *)userData;
+	char *sev;
+
+	sev = hash_lookup("sev",logData);
+	if(sev != NULL){
+		if(strcmp(sev,"debug") == 0 && filt->debug == 0){
+			return;
+		}
+		if(strcmp(sev,"warnopt") == 0 && filt->warnOpt == 0){
+			return;
+		}
+		if(strcmp(sev,"warnbase") == 0 && filt->warnBase == 0){
+			return;
+		}
+		if(strcmp(sev,"warnundef") == 0 && filt->warnUndefined== 0){
+			return;
+		}
+	}
+
+	hash_enumerate(logData,defaultLogPrint);
+	fprintf(stdout,"\n");
+}
+/*----------------------------------------------------------------*/
 int main(int argc, char *argv[])
 {
 	pNXVcontext nxvContext = NULL;
@@ -25,19 +63,32 @@ int main(int argc, char *argv[])
 	int warnOpt = 0, warnBase = 0, warnUndefined = 0;
   char c;
   int status = 0;
+	PrintFilter filt;
 
-	while ((c = getopt (argc, argv, "a:l:obu")) != -1) {
+	/*
+		should all be 0 in production
+	*/
+	filt.warnOpt = 1;
+	filt.warnBase = 1;
+	filt.warnUndefined = 1;
+	filt.debug = 0;
+
+
+	while ((c = getopt (argc, argv, "a:l:obdu")) != -1) {
     switch (c)
     {
       case 'o':
-        warnOpt = 1;
+        filt.warnOpt = 1;
         break;
       case 'b':
-        warnBase = 1;
+        filt.warnBase = 1;
         break;
       case 'u':
-        warnUndefined = 1;
+        filt.warnUndefined = 1;
         break;
+				case 'd':
+	        filt.debug = 1;
+	        break;
 			case 'a':
 				appDef = strdup(optarg);
 				break;
@@ -62,7 +113,7 @@ int main(int argc, char *argv[])
 
 	if(argc <= optind){
 		fprintf(stderr,"ERROR: no data file to validate specified\n");
-		fprintf(stderr,"Usage:\n\tnxvvalidate -a appdef -l appdefdir -o -b -u datafile\n");
+		fprintf(stderr,"Usage:\n\tnxvvalidate -a appdef -l appdefdir -o -b -u -d datafile\n");
 		exit(1);
 	}
 
@@ -71,6 +122,7 @@ int main(int argc, char *argv[])
 		fprintf(stdout,"ERROR: failed to allocate validation context\n");
 		exit(1);
 	}
+	NXVsetLogger(nxvContext, FilteringLogger, &filt);
   status =  NXVvalidate(nxvContext, argv[optind], appDef, NULL);
 	NXVkill(nxvContext);
 	return(status);

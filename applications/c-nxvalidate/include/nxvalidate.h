@@ -11,6 +11,10 @@
 #define __NXVVALIDATE
 #include <nxvhash.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
 typedef struct __NXVContext *pNXVcontext;
 /*
  * NXVinit initializes the validation context Mainly
@@ -76,5 +80,9 @@ void NXVsetNXDLRetriever(pNXVcontext self, RetrieveNXDL retriever,
 */
 int NXVvalidate(pNXVcontext self, char *dataFile,
 								char *nxdlFile, char *path);
+
+#ifdef __cplusplus
+};
+#endif /* __cplusplus */
 
 #endif

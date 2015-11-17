@@ -50,6 +50,8 @@ void NXVprintLog(pNXVcontext self, char *key, char *format, ...);
  */
 int NXVloadAppDef(pNXVcontext self, char *nxdlFile);
 xmlNodePtr NXVfindEntry(pNXVcontext self);
+void NXVloadBaseClass(pNXVcontext self,
+		hash_table *baseNames, char *baseClass);
 
 /*
  * implementd in nxvgroup.c

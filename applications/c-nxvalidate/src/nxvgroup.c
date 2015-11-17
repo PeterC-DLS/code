@@ -299,7 +299,7 @@ static void validateDependsOn(pNXVcontext self, hid_t groupID,
 	/* TODO */
 }
 /*---------------------------------------------------------------
-We need two passes:
+For group validationwe  need two passes:
 
 * In the first pass we try to find all the stuff in the NXDL
   group
@@ -310,29 +310,111 @@ I keep the names already seen in the first pass in a
 hash table
 
 ----------------------------------------------------------------*/
+typedef struct {
+	hash_table *namesSeen;
+	hash_table *baseNames;
+	pNXVcontext self;
+} SecondPassData;
+/*--------------------------------------------------------------*/
+static herr_t SecondPassIterator(hid_t g_id,
+		const char *name,
+		const H5L_info_t *info, void *op_data)
+{
+	SecondPassData *spd = (SecondPassData *)op_data;
+  H5O_info_t obj_info;
+	hid_t attID, groupID, dataID;
+	char nxClass[512], fname[512];
+
+	/*
+		have we seen that yet?
+	*/
+	if(hash_lookup(name,spd->namesSeen) != NULL){
+		return 0;
+	}
+
+	/*
+		Nope, we will have to warn...
+	*/
+	H5Oget_info_by_name(g_id, name, &obj_info,H5P_DEFAULT);
+	if(obj_info.type == H5O_TYPE_GROUP){
+		groupID = H5Gopen(g_id,name,H5P_DEFAULT);
+		H5Iget_name(groupID, fname,sizeof(fname));
+		NXVsetLog(spd->self,"dataPath",fname);
+		if(H5LTfind_attribute(groupID,"NX_class") == 1){
+			memset(nxClass,0,sizeof(nxClass));
+			H5LTget_attribute_string(g_id,name,
+			"NX_class", nxClass);
+			if(hash_lookup(nxClass,spd->baseNames) == NULL){
+				NXVsetLog(spd->self,"sev","warnundef");
+				NXVprintLog(spd->self,"message","Unknown group %s of class %s found",
+					name, nxClass);
+				NXVlog(spd->self);
+				spd->self->warnCount++;
+			} else {
+				NXVsetLog(spd->self,"sev","warnbase");
+				NXVprintLog(spd->self,"message",
+					"Additional base class group %s of type %s found",
+					name, nxClass);
+				NXVlog(spd->self);
+				spd->self->warnCount++;
+			}
+		} else {
+			NXVsetLog(spd->self,"sev","warnundef");
+			NXVprintLog(spd->self,"message",
+				"Additional non NeXus group %s found",
+				name);
+			NXVlog(spd->self);
+			spd->self->warnCount++;
+    }
+		H5Gclose(groupID);
+	} else if (obj_info.type == H5O_TYPE_DATASET) {
+		dataID = H5Dopen(g_id,name,H5P_DEFAULT);
+		H5Iget_name(dataID, fname,sizeof(fname));
+		H5Dclose(dataID);
+		NXVsetLog(spd->self,"dataPath",fname);
+		if(hash_lookup(name,spd->baseNames) == NULL){
+			NXVsetLog(spd->self,"sev","warnundef");
+			NXVprintLog(spd->self,"message","Unknown dataset %s found",
+			name);
+			NXVlog(spd->self);
+			spd->self->warnCount++;
+		} else {
+			NXVsetLog(spd->self,"sev","warnbase");
+			NXVprintLog(spd->self,"message","Additional base class dataset %s found",
+			name);
+			NXVlog(spd->self);
+			spd->self->warnCount++;
+		}
+	}
+
+	return 0;
+}
+/*--------------------------------------------------------------*/
 int NXVvalidateGroup(pNXVcontext self, hid_t groupID,
 	xmlNodePtr groupNode)
 {
-		hash_table namesSeen;
+		hash_table namesSeen, baseNames;
 		xmlNodePtr cur = NULL;
-		xmlChar *name = NULL;
+		xmlChar *name = NULL, *myClass = NULL;
 		xmlChar *target = NULL;
 		hid_t childID;
 		char fName[256], childName[512], nxdlChildPath[512], childPath[512];
 		char mynxdlPath[512];
-		char *savedNXDLPath;
+		char *savedNXDLPath, *pPtr;
+		SecondPassData spd;
+		hsize_t idx = 0;
+
 		/*
 			manage nxdlPath, xmlGetNodePath does not work
 		*/
 		savedNXDLPath = self->nxdlPath;
-		name = xmlGetProp(groupNode,(xmlChar *)"type");
+		myClass = xmlGetProp(groupNode,(xmlChar *)"type");
 		if(self->nxdlPath == NULL) {
-			snprintf(mynxdlPath,sizeof(mynxdlPath),"/%s", (char *) name);
+			snprintf(mynxdlPath,sizeof(mynxdlPath),"/%s", (char *) myClass);
 		} else {
 			snprintf(mynxdlPath,sizeof(mynxdlPath),"%s/%s",
-				self->nxdlPath, (char *) name);
+				self->nxdlPath, (char *) myClass);
 		}
-		xmlFree(name);
 		self->nxdlPath = mynxdlPath;
 
 		/*
@@ -356,7 +438,17 @@ int NXVvalidateGroup(pNXVcontext self, hid_t groupID,
 					childID = findGroup(self, groupID, cur);
 					if(childID >= 0){
 							H5Iget_name(childID, childName,sizeof(childName));
-							hash_insert(childName,strdup(""),&namesSeen);
+							/*
+								we have to get at the HDF5 name. There may be no
+								name in the NXDL, but a suitable group has been found
+								by NXclass. 
+							*/
+							pPtr = strrchr(childName,'/');
+							if(pPtr != NULL){
+								hash_insert(pPtr+1,strdup(""),&namesSeen);
+							} else {
+								hash_insert(childName,strdup(""),&namesSeen);
+							}
 							NXVvalidateGroup(self,childID,cur);
 					} else {
 						name = xmlGetProp(cur,(xmlChar *)"type");
@@ -427,10 +519,25 @@ int NXVvalidateGroup(pNXVcontext self, hid_t groupID,
 		}
 
 		/*
-			TODO: second pass Do we want this? We will warn on this
-			anyway only. Defer for the time being...
+			Second pass: search the HDF5 group for additional
+			stuff which have not checked yet. Most of the hard work
+			is in the SecondPassIterator.
+		*/
+		hash_construct_table(&baseNames,100);
+		NXVloadBaseClass(self,&baseNames,(char *)myClass);
+		spd.baseNames = &baseNames;
+		spd.namesSeen = &namesSeen;
+		spd.self = self;
+		NXVsetLog(self,"nxdlPath", mynxdlPath);
+		H5Literate(groupID, H5_INDEX_NAME, H5_ITER_INC, &idx,
+			SecondPassIterator, &spd);
+
+		/*
+			clean up
 		*/
 		hash_free_table(&namesSeen,free);
+		hash_free_table(&baseNames,free);
+		xmlFree(myClass);
 		/*
 			restore my paths...
 		*/
